@@ -1,0 +1,62 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from flask import Flask, request, jsonify, render_template
+
+app = Flask(__name__)
+
+# Load the model
+MODEL_PATH = './backend/model/plant1_disease_model.h5'
+model = tf.keras.models.load_model(MODEL_PATH)
+
+# Load the dataset and prepare class labels
+data_dir = '/Users/praveenajk/Downloads/archive/New Plant Diseases Dataset(Augmented)/New Plant Diseases Dataset(Augmented)/train'
+data_gen = ImageDataGenerator(rescale=1.0/255, validation_split=0.2)
+train_generator = data_gen.flow_from_directory(
+    data_dir,
+    target_size=(256, 256),
+    batch_size=32,
+    class_mode='categorical',
+    subset='training')
+class_indices = train_generator.class_indices
+class_labels = {v: k for k, v in class_indices.items()}
+
+# Ensure uploads directory exists
+UPLOAD_FOLDER = './uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+@app.route('/')
+def home():
+    return render_template('upload.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return render_template('result.html', prediction='No file uploaded')
+
+    file = request.files['file']
+    if file.filename == '':
+        return render_template('result.html', prediction='No selected file')
+
+    # Save the file
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(file_path)
+
+    # Preprocess the image
+    img = tf.keras.utils.load_img(file_path, target_size=(256, 256))
+    img_array = tf.keras.utils.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    img_array /= 255.0  # Rescale like training data
+
+    # Predict the class
+    predictions = model.predict(img_array)
+    predicted_class = np.argmax(predictions, axis=1)[0]
+    predicted_label = class_labels[predicted_class]
+
+    return render_template('result.html', prediction=predicted_label)
+
+if __name__ == '__main__':
+    app.run(debug=True)
